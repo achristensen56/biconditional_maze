@@ -141,6 +141,7 @@ def draw_background(screen, game, context= None, platform_cond = None, mouse_sta
  
 
 def main(): 
+
     pygame.init()
      
     # Set the width and height of the screen [width, height]
@@ -157,9 +158,9 @@ def main():
     clock = pygame.time.Clock()
 
     game = ME.Maze()
-    mouse = drl.DQAgent(eps = .1)
+    mouse = drl.DQAgent(eps = .2, state_space = 208)
     state = game.reset()
-    state_con = convert_state(*state)
+    state_con = convert_state_all(game, *state)
      
     # -------- Main Program Loop -----------
     i = 0;
@@ -178,22 +179,22 @@ def main():
      
         # If you want a background image, replace this clear with blit'ing the
         # background image.
-        #screen.fill(WHITE)
+        screen.fill(WHITE)
 
         action, Q = mouse.select_action(state_con)
+
         next_state, reward = game.step(action[0])
-        next_state_converted = convert_state(next_state)
+        next_state_converted = convert_state_all(game, *next_state)
 
         mouse.update_network(reward, state_con, next_state_converted, action, Q)
         state = next_state
         state_con = next_state_converted
 
-
-        #draw_background(screen, game, *state, game.current_target_platform, reward)
+        draw_background(screen, game, *state, game.current_target_platform, reward)
         textsurface = display_stats(screen, game)
      
         # --- Go ahead and update the screen with what we've drawn.
-        #[screen.blit(line, (400, 100 + i*20)) for i, line in enumerate(textsurface)]
+        [screen.blit(line, (400, 100 + i*20)) for i, line in enumerate(textsurface)]
     
         if i % 50 == 0:
             surf = display_graph(game)
@@ -204,11 +205,11 @@ def main():
 
      
         # --- Limit to 60 frames per second
-        #clock.tick(100)
+        clock.tick(100)
         i+=1
      
     # Close the window and quit.
-    pygame.quit()
+    #pygame.quit()
 
 
 def display_stats(screen, game):
@@ -264,6 +265,40 @@ def convert_state(context= None, platform_cond = None, mouse_state = 0):
 
     return state
 
+
+def convert_state_all(game, context, platform_cond, mouse_state):
+    '''
+    (context 2) x (platform condition 2) x (previous reward location 4)
+    (platform location 13)
+
+    '''
+
+    vis_plat_ind = {0: 0, 
+                    1: 1, 
+                    2: 2, 
+                    3: 3, 
+                    4: 0, 
+                    5: 0, 
+                    6: 1, 
+                    7: 1, 
+                    8: 2,
+                    9: 2, 
+                    10: 3, 
+                    11: 3}
+
+    try:              
+        plat = game.platform_cond[vis_plat_ind[mouse_state]]
+    except:
+        #print("platform exception, mouse state: {}".format(mouse_state))
+        plat = 0
+    
+    state_tensor = np.arange(0, 208).reshape([2, 2, 4, 13])
+    
+    rew = game.last_rewarded_platform
+
+    state_num = state_tensor[context, plat, rew, mouse_state]
+
+    return np.identity(208)[state_num:state_num + 1]
 
 if __name__ == '__main__':
     main()

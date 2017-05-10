@@ -16,7 +16,7 @@ class Maze():
 	    -----------------------
 	                    |  12  |
 	    -----------------------
-	   |  8  | 9 |  10  |  11  |
+	   |  8  | 9  |  10  |  11  |
 	    -----------------------
 	   |  2  |           |  3  |
 	    -----             -----
@@ -35,7 +35,8 @@ class Maze():
 	    				  8: [0, 0, 1, 0], 
 	    				  9: [0, 0, 1, 0], 
 	    				  10: [0, 0, 0, 1], 
-	    				  11: [0, 0, 0, 1]}
+	    				  11: [0, 0, 0, 1], 
+	    				  12: [0, 0, 0, 0]}
 
 
 
@@ -117,7 +118,7 @@ class Maze():
 		self.num_batches = 0
 		self.total_trial_num = 0
 		self.batch_trial_num = 0
-		self.last_rewarded_platform = None
+		self.last_rewarded_platform = 0
 		self.total_rewards_received = 0
 		self.batch_rewards_received = 0
 		self.reward_history = []
