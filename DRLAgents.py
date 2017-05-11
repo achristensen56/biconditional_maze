@@ -68,5 +68,34 @@ class DQAgent():
 
 		self.sess.run(self.train_step, feed_dict = {self.inputs: old_state, self.nextQ: targetQ})
 
-	def function():
-		pass
+
+
+class tabular_agent():
+	def __init__(self, state_space = 104, num_actions = 4):
+		self.Q = np.zeros([state_space, num_actions])
+		self.lr = .85
+		self.gamma = .99
+		self.eps = .1
+	def select_action(self, state):
+
+		state = np.argmax(state)
+
+		
+		#use an epsilon greedy policy to select an action
+		if np.random.rand(1) < self.eps:
+			a = np.random.randint(4)
+		else:
+			a = np.argmax(self.Q[state, :])
+
+
+		return [a], self.Q[state, a]
+
+
+	def update_network(self, r, old_state, new_state, a, oldQ):
+		old_state = np.argmax(old_state)
+		new_state = np.argmax(new_state)
+
+
+		self.Q[old_state,a] += self.lr*(r + self.gamma*np.max(self.Q[new_state, :]) -  self.Q[old_state, a])
+
+		

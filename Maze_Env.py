@@ -130,7 +130,7 @@ class Maze():
 		return (self.current_context, self.vis_platform_cond, self.current_position)
 
 	def initialize_new_batch(self):
-		self.reward_history.append(self.batch_rewards_received / self.num_batch_steps)
+		self.reward_history.append(float(self.batch_rewards_received)/ self.num_batch_steps)
 
 		self.num_batch_steps = 0
 		self.batch_rewards_received = 0

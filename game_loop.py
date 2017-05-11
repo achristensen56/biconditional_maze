@@ -13,10 +13,11 @@ import pygame
 import Maze_Env as ME
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")
+#matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.backends.backend_agg as agg
-
+import sys
+import argparse
 import DRLAgents as drl 
 
 # Define some colors
@@ -24,6 +25,11 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
+
+
+DISPLAY = True
+VERBOSE = False
+
 
 textures = {
     'BEDDING': pygame.transform.scale(pygame.image.load('./imgs/bedding.jpg'), (50, 50)),
@@ -34,7 +40,7 @@ textures = {
 
 
 
-def draw_background(screen, game, context= None, platform_cond = None, mouse_state = 0, targ_plat = None, reward = 0):
+def draw_background(screen, game, targ_plat = None, reward = 0, context= None, platform_cond = None, mouse_state = 0):
     '''
             -----             -----
            |  0  |           |  1  |
@@ -138,18 +144,44 @@ def draw_background(screen, game, context= None, platform_cond = None, mouse_sta
 
     pygame.draw.circle(screen, mouse_col, [circ_x, circ_y], 10)
 
- 
+def get_agent(args):
 
-def main(): 
+    if args.agent == 'tabular':
+        print("succesfully loaded tabular agent")
+        return drl.tabular_agent()
+    if args.agent == 'basic_Q':
+        print("succesfully loaded deep Q agent")
+        return drl.DQAgent(state_space = 104)
 
-    pygame.init()
+
+def parse_args():
+    parser = argparse.ArgumentParser(description = 'choose the agent type')
+    parser.add_argument("agent", help="enter the agent type, options are tabular or basic_Q")
+    parser.add_argument("output", help="enter the output type, options are verbose or display")
+    args = parser.parse_args()
+
+    if args.output == 'verbose':
+        VERBOSE = True
+        DISPLAY = False
+    else:
+        DISPLAY = True
+
+    return args
+
+def main():
+
+    args = parse_args() 
+
+
+    if DISPLAY:
+        pygame.init()
      
     # Set the width and height of the screen [width, height]
-    size = (700, 500)
-    screen = pygame.display.set_mode(size)
+        size = (700, 500)
+        screen = pygame.display.set_mode(size)
      
-    pygame.display.set_caption("My Game")
-    pygame.font.init()
+        pygame.display.set_caption("My Game")
+        pygame.font.init()
      
     # Loop until the user clicks the close button.
     done = False
@@ -158,18 +190,25 @@ def main():
     clock = pygame.time.Clock()
 
     game = ME.Maze()
-    mouse = drl.DQAgent(eps = .2, state_space = 208)
+
+    mouse = get_agent(args)
     state = game.reset()
     state_con = convert_state_all(game, *state)
-     
+
     # -------- Main Program Loop -----------
+
+    actions_list = []
+    state_list = []
+    epoch_rews = 0
+    all_rew = []
     i = 0;
     while not done:
         # --- Main event loop
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                done = True
-     
+        if DISPLAY:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    done = True
+         
         # --- Game logic should go here
      
         # --- Screen-clearing code goes here
@@ -179,7 +218,8 @@ def main():
      
         # If you want a background image, replace this clear with blit'ing the
         # background image.
-        screen.fill(WHITE)
+        
+
 
         action, Q = mouse.select_action(state_con)
 
@@ -190,23 +230,54 @@ def main():
         state = next_state
         state_con = next_state_converted
 
-        draw_background(screen, game, *state, game.current_target_platform, reward)
-        textsurface = display_stats(screen, game)
-     
+        if DISPLAY:
+            screen.fill(WHITE)
+
+            draw_background(screen, game, game.current_target_platform, reward, *state)
+            textsurface = display_stats(screen, game)
+
+        if VERBOSE:
+            print("The mouse is in state: {}, and just took action: {}".format(np.argmax(state_con), action))
+
+        state_list.append(np.argmax(state_con))
+        actions_list.append(action)
         # --- Go ahead and update the screen with what we've drawn.
-        [screen.blit(line, (400, 100 + i*20)) for i, line in enumerate(textsurface)]
-    
-        if i % 50 == 0:
+
+        if DISPLAY:
             surf = display_graph(game)
-        
-        screen.blit(surf, (400, 180))
+            [screen.blit(line, (400, 100 + i*20)) for i, line in enumerate(textsurface)]
+            screen.blit(surf, (400, 180))
 
         pygame.display.flip()
 
+    
+        if i % 100 == 0:
+            all_rew.append(epoch_rews)
+            
+            if VERBOSE:
+                print("last epoch we received {} rewards".format(epoch_rews))
+            
+            epoch_rews = 0
+
+        
+
+
      
         # --- Limit to 60 frames per second
-        clock.tick(100)
+        #clock.tick(100)
         i+=1
+
+        if i == 200000 and VERBOSE:
+            done = True
+
+    plt.figure()
+    plt.subplot(131)
+    plt.hist(actions_list)
+    plt.subplot(132)
+    plt.hist(state_list)
+    plt.subplot(133)
+    plt.plot(all_rew)
+    plt.show()
      
     # Close the window and quit.
     #pygame.quit()
@@ -292,13 +363,18 @@ def convert_state_all(game, context, platform_cond, mouse_state):
         #print("platform exception, mouse state: {}".format(mouse_state))
         plat = 0
     
-    state_tensor = np.arange(0, 208).reshape([2, 2, 4, 13])
+    state_tensor = np.arange(0, 104).reshape([2, 2, 2, 13])
     
     rew = game.last_rewarded_platform
 
-    state_num = state_tensor[context, plat, rew, mouse_state]
+    rew_plat_ind = { 0: 0,
+                     1: 0,
+                     2: 1,
+                     3: 1}
 
-    return np.identity(208)[state_num:state_num + 1]
+    state_num = state_tensor[context, plat, rew_plat_ind[rew], mouse_state]
+
+    return np.identity(104)[state_num:state_num + 1]
 
 if __name__ == '__main__':
     main()
