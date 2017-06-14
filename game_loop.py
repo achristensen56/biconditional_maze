@@ -19,12 +19,15 @@ import matplotlib.backends.backend_agg as agg
 import sys
 import argparse
 import DRLAgents as drl 
+import pickle
+import os
+from time import gmtime, strftime
 
 # Define some colors
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
+GREEN = (0, 255, 0, .5)
+RED = (255, 0, 0, .5)
 
 
 DISPLAY = True
@@ -38,9 +41,15 @@ textures = {
     'METAL': pygame.transform.scale(pygame.image.load('./imgs/metal.jpg'), (50, 50))
     }
 
+log_dir = os.path.join('./archive', strftime("%Y%m%d%H%M%S"))
+
+print("the archive directory is: {}".format(log_dir))
+
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
 
 
-def draw_background(screen, game, targ_plat = None, reward = 0, context= None, platform_cond = None, mouse_state = 0):
+def draw_background(screen, game, reward = 0, state = None):
     '''
             -----             -----
            |  0  |           |  1  |
@@ -53,12 +62,26 @@ def draw_background(screen, game, targ_plat = None, reward = 0, context= None, p
             -----------------------
            |  2  |           |  3  |
             -----             -----
+
+                state_num = state_tensor[context, plat, rew_plat_ind[rew], mouse_state]
     '''
 
+    state_tensor = np.arange(0, 104).reshape([2, 2, 2, 13])
+
+    state_ind = np.argmax(state)
+
+
+    context, plat, rew, mouse_state = np.where(state_tensor == state_ind)
+
+    context = context[0]
+    mouse_state = mouse_state[0]
+    plat = plat[0]
+
+    targ_plat = game.current_target_platform 
     platform_cond = game.platform_cond
 
     state_to_pix = {0: [125, 125], 
-                    1: [275, 175],
+                    1: [275, 125],
                     4: [125, 175], 
                     5: [175, 175], 
                     6: [225, 175], 
@@ -140,7 +163,18 @@ def draw_background(screen, game, targ_plat = None, reward = 0, context= None, p
     elif platform_cond[3] == 1:
         screen.blit(textures['METAL'],  (250, 300))
 
+    if plat == 0:
+        pygame.draw.circle(screen, GREEN, [circ_x, circ_y], 40)
+    elif plat == 1:
+        pygame.draw.circle(screen, RED, [circ_x, circ_y], 40)
 
+
+    if rew == 0:
+        pygame.draw.circle(screen, BLACK, [200, 100], 20)
+    elif rew == 1:
+        pygame.draw.circle(screen, BLACK, [200, 400], 20)
+
+    #print(game.last_rewarded_platform)
 
     pygame.draw.circle(screen, mouse_col, [circ_x, circ_y], 10)
 
@@ -150,8 +184,12 @@ def get_agent(args):
         print("succesfully loaded tabular agent")
         return drl.tabular_agent()
     if args.agent == 'basic_Q':
-        print("succesfully loaded deep Q agent")
-        return drl.DQAgent(state_space = 104)
+        print("succesfully loaded simple Q agent")
+        return drl.DQAgent(state_space = 104, eps = .1)
+
+    if args.agent == 'Q2':
+        print("sucesfully loaded 2 layer Q agent")
+        return drl.DQAgent2(state_space = 19, eps = .1)
 
 
 def parse_args():
@@ -192,8 +230,7 @@ def main():
     game = ME.Maze()
 
     mouse = get_agent(args)
-    state = game.reset()
-    state_con = convert_state_all(game, *state)
+    state = convert_state_all(game, *game.reset())
 
     # -------- Main Program Loop -----------
 
@@ -209,49 +246,51 @@ def main():
                 if event.type == pygame.QUIT:
                     done = True
          
-        # --- Game logic should go here
-     
-        # --- Screen-clearing code goes here
-     
-        # Here, we clear the screen to white. Don't put other drawing commands
-        # above this, or they will be erased with this command.
-     
-        # If you want a background image, replace this clear with blit'ing the
-        # background image.
+
+        action, Q = mouse.select_action(state)
+
+        next_state_, reward, d = game.step(action[0], i)
+        
+        next_state = convert_state_all(game, *next_state_)
+
+        #the archive function both saves the behavioral data tofile,
+        #and also fills the experience replay buffer
+        archive(mouse, state, action[0], reward, next_state, d)
+
+        if len(mouse.experience_buffer.buffer) >    10:
+            #batch_size = len(mouse.experience_buffer.buffer) // 2 + 1
+            batch_size = 10
+            mouse.update_network_batch(batch_size, 20)
+        else:
+            mouse.update_network(reward, state, next_state, action, Q, i)
         
 
-
-        action, Q = mouse.select_action(state_con)
-
-        next_state, reward = game.step(action[0])
-        next_state_converted = convert_state_all(game, *next_state)
-
-        mouse.update_network(reward, state_con, next_state_converted, action, Q)
         state = next_state
-        state_con = next_state_converted
+
 
         if DISPLAY:
             screen.fill(WHITE)
 
-            draw_background(screen, game, game.current_target_platform, reward, *state)
+            draw_background(screen, game, reward, convert_state_all(game, *next_state_))
             textsurface = display_stats(screen, game)
 
         if VERBOSE:
             print("The mouse is in state: {}, and just took action: {}".format(np.argmax(state_con), action))
 
-        state_list.append(np.argmax(state_con))
-        actions_list.append(action)
+        state_list.append(np.argmax(state))
+        actions_list.append(action[0])
+
         # --- Go ahead and update the screen with what we've drawn.
 
         if DISPLAY:
             surf = display_graph(game)
-            [screen.blit(line, (400, 100 + i*20)) for i, line in enumerate(textsurface)]
+            [screen.blit(line, (400, 100 + j*20)) for j, line in enumerate(textsurface)]
             screen.blit(surf, (400, 180))
 
         pygame.display.flip()
 
     
-        if i % 100 == 0:
+        if (i % 100 == 0):
             all_rew.append(epoch_rews)
             
             if VERBOSE:
@@ -259,12 +298,9 @@ def main():
             
             epoch_rews = 0
 
-        
-
-
      
         # --- Limit to 60 frames per second
-        #clock.tick(100)
+        #clock.tick(20)
         i+=1
 
         if i == 200000 and VERBOSE:
@@ -280,7 +316,7 @@ def main():
     plt.show()
      
     # Close the window and quit.
-    #pygame.quit()
+    pygame.quit()
 
 
 def display_stats(screen, game):
@@ -321,25 +357,51 @@ def display_graph(game):
 
     return pygame.image.fromstring(raw_data, size, "RGB")
 
-def convert_state(context= None, platform_cond = None, mouse_state = 0):
+def convert_state_con(game, context, platform_cond, mouse_state):
     
+    vis_plat_ind = {0: 0, 
+                    1: 1, 
+                    2: 2, 
+                    3: 3, 
+                    4: 0, 
+                    5: 0, 
+                    6: 1, 
+                    7: 1, 
+                    8: 2,
+                    9: 2, 
+                    10: 3, 
+                    11: 3}
 
-    state = np.zeros([1, 19])
+    new_state = np.zeros([1, 19]) 
 
-    if context == 0:
-        state[0, 0] = 1
-    if context == 1:
-        state[0, 1] = 1
+    try:              
+        plat = game.platform_cond[vis_plat_ind[mouse_state]]
 
-    state[0, 2:6] = platform_cond
-    state[0, mouse_state + 6] = 1 
+        new_state[plat] = 1
+    except:
+        #print("platform exception, mouse state: {}".format(mouse_state))
+        pass
 
-    return state
+    rew = game.last_rewarded_platform
+    rew_plat_ind = { 0: 0,
+                     1: 0,
+                     2: 1,
+                     3: 1}
+    
+    #this is really more like "last side rewarded"
+    rew_ = rew_plat_ind[rew]
+    #context: {01, 10}, rew_: {01, 10}, plat: {[00, 01, 10]}, mouse_state = identity(12)
+
+    new_state[0, rew_ + 2] = 1 
+    new_state[0, context + 4] = 1
+    new_state[0, mouse_state + 6] = 1 
+
+    return new_state
 
 
 def convert_state_all(game, context, platform_cond, mouse_state):
     '''
-    (context 2) x (platform condition 2) x (previous reward location 4)
+    (context 2) x (platform condition 2) x (previous reward location 2)
     (platform location 13)
 
     '''
@@ -372,9 +434,32 @@ def convert_state_all(game, context, platform_cond, mouse_state):
                      2: 1,
                      3: 1}
 
+    #print('context: {}, platform: {}, rewarded_plat: {}, mouse_state: {}'.format(context, plat, rew, mouse_state))
+
     state_num = state_tensor[context, plat, rew_plat_ind[rew], mouse_state]
 
     return np.identity(104)[state_num:state_num + 1]
+
+def archive(mouse, state, action, reward, next_state, d, batch_history = [], batch_num = []):
+    '''
+    in this function I completely abuse my newfound knowledge that 
+    python binds default arguments at definition time.
+    '''
+
+    if d == 1:
+        f = open(os.path.join(log_dir, str(len(batch_num)) + '.pkl'), 'wb')
+        pickle.dump(batch_history, f)
+        batch_num.append(1)
+        mouse.experience_buffer.add(np.array(batch_history))
+        batch_history = []
+        
+    else:
+        batch_history.append([np.squeeze(state), np.squeeze(action),
+                             reward, np.squeeze(next_state)])
+
+
+
+
 
 if __name__ == '__main__':
     main()

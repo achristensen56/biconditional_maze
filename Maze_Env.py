@@ -1,4 +1,6 @@
 import numpy as np
+import random
+import copy
 
 
 class Maze():
@@ -66,6 +68,11 @@ class Maze():
 		length blocks: 30, can drop down to blocks of 10. Some block of 40. 
 
 		'''
+		self.batch_correct = 0
+
+		self.error = False
+
+		self.trial_history = []
 		
 		#context: {0, 1}, 0: bedding, 1:(other context)
 		self.current_context = initial_context
@@ -74,7 +81,7 @@ class Maze():
 
 		#platform_cond: {0101, 0110, 1001, 1010}, where 0 corresponds to close platform smooth, 1 corresponds to close platform grided
 		#condition of platform 0, 1, 2, 3 respectively
-		self.platform_cond = self.platform_initialization[initial_platform_cond]
+		self.platform_cond = copy.deepcopy(self.platform_initialization[initial_platform_cond])
 
 		self.platform_mask = { 0: [1, 0, 0, 0], 
 		    				   1: [0, 1, 0, 0],
@@ -126,28 +133,42 @@ class Maze():
 
 
 	def reset(self):
-		self.__init__()
+		self.__init__(initial_context= np.random.randint(2), initial_platform_cond = np.random.randint(4))
 		return (self.current_context, self.vis_platform_cond, self.current_position)
 
-	def initialize_new_batch(self):
-		self.reward_history.append(float(self.batch_rewards_received)/ self.num_batch_steps)
-
+	def initialize_new_batch(self, i):
+		
+		np.random.seed(i)
+		self.reward_history.append(float(self.batch_correct)/ (self.batch_length))
 		self.num_batch_steps = 0
 		self.batch_rewards_received = 0
 		self.batch_trial_num = 0
+		self.batch_correct = 0
 		self.current_position = 12
 		#switch the context using modulo arithmetic
 		self.current_context = (self.current_context + 1) % 2
-		self.current_target_platform == None
+		self.current_target_platform = None
 		self.num_batches += 1
-		self.platform_cond == self.platform_initialization[np.random.choice([0, 1, 2, 3])]
+
+		rand = random.SystemRandom().randint(0, 3)
+
+		self.platform_cond = copy.deepcopy(self.platform_initialization[rand])
+
 		self.vis_platform_cond = (np.array(self.platform_cond) + 1)*np.array(self.platform_mask[self.current_position])
 
 
 		return (self.current_context, self.vis_platform_cond, self.current_position)
 
-	def initialize_new_trial(self, next_pos):
-		self.last_rewarded_platform == self.current_position
+	def initialize_new_trial(self, next_pos, i):
+
+		if not self.error:
+			self.batch_correct += 1
+
+		self.error = False
+
+		np.random.seed(i)
+
+		self.last_rewarded_platform = next_pos
 		self.total_rewards_received += 1
 		self.batch_rewards_received += 1
 
@@ -158,24 +179,28 @@ class Maze():
 
 		self.current_position = next_pos
 
-		new_platform_cond = self.platform_initialization[np.random.randint(4)]
+		rand = random.SystemRandom().randint(0, 3)
+
+		new_platform_cond = copy.deepcopy(self.platform_initialization[rand])
 
 
 		if next_pos in [0, 1]:
-			self.platform_cond[2:4] = new_platform_cond[2:4]
+			#print('should switch bottom')
+			self.platform_cond[2:4] = copy.deepcopy(new_platform_cond[2:4])
 			self.current_target_platform = self.platform_cond[2:4].index(self.platform_mapping[self.current_context]) + 2
-
 		else:
-			self.platform_cond[0:2] = new_platform_cond[0:2]
+			#print('should switch top')
+			self.platform_cond[0:2] = copy.deepcopy(new_platform_cond[0:2])
 			self.current_target_platform = self.platform_cond[0:2].index(self.platform_mapping[self.current_context])
 
+		#print(rand, new_platform_cond, self.platform_cond, self.platform_initialization)
 
 		self.vis_platform_cond = (np.array(self.platform_cond) + 1)*np.array(self.platform_mask[self.current_position])
 		return self.current_context, self.vis_platform_cond, self.current_position
 
 
 
-	def step(self, action):
+	def step(self, action, i):
 		'''action 0: up, 1: down, 2: left, 3: right, 4: lick
 		   This function implements the main logic for the game. 
 		   Currently doesn't require a lick to receive a reward, 
@@ -184,6 +209,7 @@ class Maze():
 
 		self.num_batch_steps += 1
 		state = None
+		d = 0
 
 		next_pos = self.transition_table[self.current_position][action]
 
@@ -195,9 +221,11 @@ class Maze():
 			if next_pos in [0, 1, 2, 3]:
 				if self.platform_cond[next_pos] == self.platform_mapping[self.current_context]:
 					reward = 1
-					state = self.initialize_new_trial(next_pos)
+					state = self.initialize_new_trial(next_pos, i)
+					
 				else:
 					reward = 0
+					self.error = True
 					self.current_position = next_pos
 					state = (self.current_context, self.vis_platform_cond, self.current_position)
 			else:
@@ -213,15 +241,19 @@ class Maze():
 
 				#this logic (initilizing new trial before checking if itwas the last trial in the 
 				#block is slightly less efficient but leads to much prettier coe)
-				state = self.initialize_new_trial(next_pos)
+				state = self.initialize_new_trial(next_pos, i)
+
 
 				if self.batch_trial_num > self.batch_length:
 					#do start new batch!
 					# self.initialize_new_batch
-					state = self.initialize_new_batch()
-
+					state = self.initialize_new_batch(i)
+					d = 1
 
 			else:
+				if next_pos in [0, 1, 2, 3]:
+					self.error = True
+
 				reward = 0
 
 				self.current_position = next_pos
@@ -229,10 +261,13 @@ class Maze():
 				state = (self.current_context, self.vis_platform_cond, self.current_position)
 
 
-
-		return state, reward
+		return state, reward, d
 
 	def render(self, mode = 'human', close = False):
 		'''render the current frame of the maze'''
+		pass
+
+	def logging():
+		''' TODO log the all the actions taken'''
 		pass
 
