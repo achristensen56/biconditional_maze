@@ -191,6 +191,9 @@ def get_agent(args):
         print("sucesfully loaded 2 layer Q agent")
         return drl.DQAgent2(state_space = 19, eps = .1)
 
+    if args.agent == 'DRLAgent':
+        print('loading DRL agent')
+        return drl.DRLAgent()
 
 def parse_args():
     parser = argparse.ArgumentParser(description = 'choose the agent type')
@@ -209,6 +212,9 @@ def parse_args():
 def main():
 
     args = parse_args() 
+
+
+    state_archive = State_Archive()
 
 
     if DISPLAY:
@@ -230,7 +236,7 @@ def main():
     game = ME.Maze()
 
     mouse = get_agent(args)
-    state = convert_state_all(game, *game.reset())
+    state = convert_state_rec(game, *game.reset())
 
     # -------- Main Program Loop -----------
 
@@ -247,22 +253,30 @@ def main():
                     done = True
          
 
-        action, Q = mouse.select_action(state)
+        
+        curr_state_list = state_archive.get_archive() 
+        action, Q = mouse.select_action(curr_state_list)
 
         next_state_, reward, d = game.step(action[0], i)
         
-        next_state = convert_state_all(game, *next_state_)
+        
+
+        next_state = convert_state_rec(game, *next_state_)
 
         #the archive function both saves the behavioral data tofile,
         #and also fills the experience replay buffer
-        archive(mouse, state, action[0], reward, next_state, d)
+        #archive(mouse, state, action[0], reward, next_state, d)
+        state_archive.add_experience(next_state)
+        next_state_list = state_archive.get_archive()
 
-        if len(mouse.experience_buffer.buffer) >    5:
+        mouse.update_network(reward, curr_state_list, next_state_list, action, Q, False)
+
+#        if len(mouse.experience_buffer.buffer) >    5:
             #batch_size = len(mouse.experience_buffer.buffer) // 2 + 1
-            batch_size = 3
-            mouse.update_network_batch(batch_size, 5)
-        else:
-            mouse.update_network(reward, state, next_state, action, Q, False)
+#            batch_size = 3
+#            mouse.update_network_batch(batch_size, 5)
+#       else:
+#           mouse.update_network(reward, state, next_state, action, Q, i)
         
 
         state = next_state
@@ -398,6 +412,46 @@ def convert_state_con(game, context, platform_cond, mouse_state):
 
     return new_state
 
+def convert_state_rec(game, context, platform_cond, mouse_state):
+    vis_plat_ind = {0: 0, 
+                    1: 1, 
+                    2: 2, 
+                    3: 3, 
+                    4: 0, 
+                    5: 0, 
+                    6: 1, 
+                    7: 1, 
+                    8: 2,
+                    9: 2, 
+                    10: 3, 
+                    11: 3}
+
+    new_state = np.zeros([1, 17]) 
+
+    try:              
+        plat = game.platform_cond[vis_plat_ind[mouse_state]]
+
+        new_state[plat] = 1
+    except:
+        #print("platform exception, mouse state: {}".format(mouse_state))
+        pass
+
+#    rew = game.last_rewarded_platform
+#    rew_plat_ind = { 0: 0,
+#                     1: 0,
+#                     2: 1,
+#                     3: 1}
+    
+    #this is really more like "last side rewarded"
+#    rew_ = rew_plat_ind[rew]
+    #context: {01, 10}, rew_: {01, 10}, plat: {[00, 01, 10]}, mouse_state = identity(12)
+
+#    new_state[0, rew_ + 2] = 1 
+    new_state[0, context + 2] = 1
+    new_state[0, mouse_state + 4] = 1 
+
+    return new_state    
+
 
 def convert_state_all(game, context, platform_cond, mouse_state):
     '''
@@ -460,7 +514,23 @@ def archive(mouse, state, action, reward, next_state, d, batch_history = [], bat
 
 
 
+class State_Archive():
+    def __init__(self):
+        self.archive = []
+    def add_experience(self, state):
+        self.archive.append(state)
+
+        if len(self.archive) > 10:
+            self.archive = self.archive[-10:]
+
+    def get_archive(self):
+        return np.array(archive)
+
+
+
+
 
 if __name__ == '__main__':
     main()
+
 

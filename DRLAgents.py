@@ -20,7 +20,7 @@ class DQAgent():
 		#discount factor
 		self.y = gam
 
-		self.experience_buffer = ExperienceBuffer(buffer_size = 1000)
+		self.experience_buffer = ExperienceBuffer(buffer_size = 100)
 
 		#set up log directory for tensorboard logging
 		self.log_dir = os.path.join('./logs', strftime("%Y%m%d%H%M%S"))
@@ -325,6 +325,121 @@ class DQAgent2():
 
 #	def write_summary(state, target_Q):
 #		summary = self.sess.run(self.merged, feed_dict = {self.inputs: state, self.nextQ: targetQ})
+
+
+class DRLAgent():
+	'''
+	'''
+	def __init__(self, eps = .1, gam = .99):
+		'''
+		12 spatial positions, 2 context, 2 spatial
+
+		'''
+		self.num_hidden = 25
+		self.num_steps = 10
+		self.num_out = 4
+
+		with tf.name_scope('inputs'):
+			self.inputs = tf.placeholder(shape = [10, 17], dtype = tf.float32)
+			self.spatial = self.inputs[:, 0:13]
+			self.context = self.inputs[:, 13:]
+
+		with tf.name_scope('spatial_embedding'):
+			self.W1 = tf.Variable(tf.random_uniform([13, self.num_hidden], 0, 0.01))
+			self.b1 = tf.Variable(tf.random_uniform([self.num_hidden], 0, 0.01))
+			self.variable_summaries(self.W1)
+			self.spatial_embedding = tf.nn.relu(tf.matmul(self.spatial, self.W1) + self.b1)
+
+		with tf.name_scope('lstm'):
+			with tf.variable_scope('first_layer'):
+				self.lstm1 = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(self.num_hidden)
+
+			with tf.variable_scope('second_layer'):
+				self.lstm2 = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(self.num_hidden)
+
+			self.initial_state_1 = self.state1 = tf.tuple([tf.zeros([1, self.num_hidden]), tf.zeros([1, self.num_hidden])])
+			self.initial_state_2 = self.state2 = tf.tuple([tf.zeros([1, self.num_hidden]), tf.zeros([1, self.num_hidden])])
+
+			self.W2 = tf.Variable(tf.random_uniform([self.num_hidden, self.num_hidden], 0, 0.01))
+			self.b2 = tf.Variable(tf.random_uniform([self.num_hidden], 0, 0.01))
+
+			self.W3 = tf.Variable(tf.random_uniform([self.num_hidden, self.num_out], 0, 0.01))
+			self.b3 = tf.Variable(tf.random_uniform([self.num_out], 0, 0.01))
+
+			for i in range(self.num_steps):
+
+				with tf.variable_scope('first_layer'):
+					self.output1, self.state1 = self.lstm1(tf.reshape(self.spatial_embedding[i, :], [1, self.num_hidden]), self.state1)
+				
+				self.input2 = tf.nn.relu(tf.matmul(self.output1, self.W2) + self.b2)
+
+				with tf.variable_scope('second_layer'):
+					self.output2, self.state2 = self.lstm2(self.input2, self.state2)
+
+
+		with tf.name_scope('output'):
+			self.Qout = tf.nn.relu(tf.matmul(self.output2, self.W3) + self.b3)
+			self.variable_summaries(self.Qout)
+
+			self.predict = tf.argmax(self.Qout, 1)
+
+		with tf.name_scope('loss'):
+			self.nextQ = tf.placeholder(shape = [1, self.num_actions], dtype = tf.float32)
+			self.loss = tf.reduce_sum(tf.square(self.nextQ - self.Qout))
+			self.variable_summaries(self.loss)
+
+		with tf.name_scope('train'):
+			self.train_step = tf.train.AdamOptimizer(2e-3).minimize(self.loss)
+
+		self.sess = tf.Session()
+		self.merged = tf.summary.merge_all()
+		self.train_writer = tf.summary.FileWriter(self.log_dir, self.sess.graph)
+		self.sess.run(tf.global_variables_initializer())
+
+
+	def variable_summaries(self, var):
+		with tf.name_scope('summaries'):
+			mean = tf.reduce_mean(var)
+			tf.summary.scalar('mean', mean)
+			with tf.name_scope('stddev'):
+				stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+			tf.summary.scalar('stddev', stddev)
+			tf.summary.scalar('max', tf.reduce_max(var))
+			tf.summary.scalar('min', tf.reduce_min(var))
+			tf.summary.histogram('histogram', var)
+
+	def save_variables(self, i, model_name = './models/bigger_deep_Q'):
+		self.saver.save(sess = self.sess, save_path = model_name, global_step = i)
+	
+	def write_summary(self, old_state, targetQ):
+		summary = self.sess.run(self.merged, feed_dict = {self.inputs: old_state, self.nextQ: targetQ})
+		self.train_writer.add_summary(summary)
+
+	def select_action(self, state):
+
+		print state.shape
+		a, allQ = self.sess.run([self.predict, self.Qout], feed_dict = {self.inputs:state})
+
+
+
+		if np.random.rand(1) < self.epsilon:
+			a[0]= np.random.randint(self.num_actions)
+		return a, allQ
+
+	def update_network(self, r, old_state, new_state, a, allQ, write_summary = False):
+		Q_new = self.sess.run(self.Qout, feed_dict = {self.inputs: new_state})
+		maxQnew = np.max(Q_new)
+
+		targetQ = allQ
+
+		targetQ[0, a[0]] = r + self.y*maxQnew
+
+		if not write_summary:
+			self.sess.run(self.train_step, feed_dict = {self.inputs: old_state, self.nextQ: targetQ})
+		else:
+			summary, _ = self.sess.run([self.merged, self.train_step], feed_dict = {self.inputs: old_state, self.nextQ: targetQ})
+			self.train_writer.add_summary(summary)
+
 
 class ExperienceBuffer():
 	'''
