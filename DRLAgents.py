@@ -48,7 +48,7 @@ class DQAgent():
 			self.variable_summaries(self.Qout)
 
 			self.predict = tf.argmax(self.Qout, 1)
-			#self.variable_summaries(self.predict)
+			self.variable_summaries(self.predict)
 			
 		with tf.name_scope('loss'):
 			self.nextQ = tf.placeholder(shape = [None, self.num_actions], dtype = tf.float32)
@@ -330,14 +330,32 @@ class DQAgent2():
 class DRLAgent():
 	'''
 	'''
-	def __init__(self, eps = .1, gam = .99):
+	def __init__(self, eps = .5, gam = .9, state_space = 17):
 		'''
-		12 spatial positions, 2 context, 2 spatial
+		13 spatial positions, 2 context, 2 spatial
 
 		'''
-		self.num_hidden = 25
+
+		#exploration factor
+		self.epsilon = eps
+		#discount factor
+		self.y = gam
+
+		#set up log directory for tensorboard logging
+		self.log_dir = os.path.join('./logs', strftime("%Y%m%d%H%M%S"))
+
+		print("the log directory is: {}".format(self.log_dir))
+		if not os.path.exists(self.log_dir):
+			os.makedirs(os.path.join(self.log_dir))
+
+
+		tf.reset_default_graph()
+
+		self.num_hidden = 20
+		self.state_space = state_space
+	
 		self.num_steps = 10
-		self.num_out = 4
+		self.num_out = self.num_actions  = 4
 
 		with tf.name_scope('inputs'):
 			self.inputs = tf.placeholder(shape = [10, 17], dtype = tf.float32)
@@ -350,31 +368,40 @@ class DRLAgent():
 			self.variable_summaries(self.W1)
 			self.spatial_embedding = tf.nn.relu(tf.matmul(self.spatial, self.W1) + self.b1)
 
-		with tf.name_scope('lstm'):
-			with tf.variable_scope('first_layer'):
-				self.lstm1 = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(self.num_hidden)
+		with tf.name_scope('context_embedding'):
+			self.W4 = tf.Variable(tf.random_uniform([4, self.num_hidden], 0, 0.01))
+			#self.b4 = tf.Variable(tf.random_uniform([self.num_hidden], 0, 0.01))
+			self.variable_summaries(self.W4)
+			self.context_embedding = tf.matmul(self.context, self.W4)
 
-			with tf.variable_scope('second_layer'):
-				self.lstm2 = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(self.num_hidden)
+		self.initial_state_1 = self.state1 = tf.tuple([tf.zeros([1, self.num_hidden]), tf.zeros([1, self.num_hidden])])
+		self.initial_state_2 = self.state2 = tf.tuple([tf.zeros([1, self.num_hidden]), tf.zeros([1, self.num_hidden])])
 
-			self.initial_state_1 = self.state1 = tf.tuple([tf.zeros([1, self.num_hidden]), tf.zeros([1, self.num_hidden])])
-			self.initial_state_2 = self.state2 = tf.tuple([tf.zeros([1, self.num_hidden]), tf.zeros([1, self.num_hidden])])
+		self.W2 = tf.Variable(tf.random_uniform([self.num_hidden, self.num_hidden], 0, 0.01))
+		self.b2 = tf.Variable(tf.random_uniform([self.num_hidden], 0, 0.01))
 
-			self.W2 = tf.Variable(tf.random_uniform([self.num_hidden, self.num_hidden], 0, 0.01))
-			self.b2 = tf.Variable(tf.random_uniform([self.num_hidden], 0, 0.01))
+		self.W3 = tf.Variable(tf.random_uniform([self.num_hidden, self.num_out], 0, 0.01))
+		self.b3 = tf.Variable(tf.random_uniform([self.num_out], 0, 0.01))
 
-			self.W3 = tf.Variable(tf.random_uniform([self.num_hidden, self.num_out], 0, 0.01))
-			self.b3 = tf.Variable(tf.random_uniform([self.num_out], 0, 0.01))
+		with tf.variable_scope('first_layer'):
+			self.lstm1 = tf.contrib.rnn.BasicLSTMCell(self.num_hidden)
+			self.output1, self.state1 = self.lstm1(tf.reshape(self.spatial_embedding[0, :], [1, self.num_hidden]), self.state1)
 
-			for i in range(self.num_steps):
+		self.input2 = tf.nn.relu(tf.matmul(self.output1, self.W2) + self.b2)
+		
+		with tf.variable_scope('second_layer'):
+			self.lstm2 = tf.contrib.rnn.BasicLSTMCell(self.num_hidden)
+			self.output2, self.state2 = self.lstm2(self.input2, self.state2)
 
-				with tf.variable_scope('first_layer'):
-					self.output1, self.state1 = self.lstm1(tf.reshape(self.spatial_embedding[i, :], [1, self.num_hidden]), self.state1)
-				
-				self.input2 = tf.nn.relu(tf.matmul(self.output1, self.W2) + self.b2)
+		for i in range(1, self.num_steps):
 
-				with tf.variable_scope('second_layer'):
-					self.output2, self.state2 = self.lstm2(self.input2, self.state2)
+			with tf.variable_scope('first_layer', reuse = True):
+				self.output1, self.state1 = self.lstm1(tf.reshape(self.spatial_embedding[i, :], [1, self.num_hidden]), self.state1)
+			
+			self.input2 = tf.nn.relu(tf.matmul(self.output1, self.W2) + self.context_embedding[i, :] + self.b2)
+
+			with tf.variable_scope('second_layer', reuse = True):
+				self.output2, self.state2 = self.lstm2(self.input2, self.state2)
 
 
 		with tf.name_scope('output'):
@@ -417,7 +444,7 @@ class DRLAgent():
 
 	def select_action(self, state):
 
-		print state.shape
+		#print state.shape
 		a, allQ = self.sess.run([self.predict, self.Qout], feed_dict = {self.inputs:state})
 
 

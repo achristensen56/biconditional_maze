@@ -253,9 +253,12 @@ def main():
                     done = True
          
 
-        
-        curr_state_list = state_archive.get_archive() 
-        action, Q = mouse.select_action(curr_state_list)
+        if i > 10:
+            curr_state_list = state_archive.get_archive() 
+            action, Q = mouse.select_action(curr_state_list)
+        else:
+            action = [np.random.randint(4)]
+            Q = 0
 
         next_state_, reward, d = game.step(action[0], i)
         
@@ -269,7 +272,8 @@ def main():
         state_archive.add_experience(next_state)
         next_state_list = state_archive.get_archive()
 
-        mouse.update_network(reward, curr_state_list, next_state_list, action, Q, False)
+        if i > 10:
+            mouse.update_network(reward, curr_state_list, next_state_list, action, Q, (i%10 == 0))
 
 #        if len(mouse.experience_buffer.buffer) >    5:
             #batch_size = len(mouse.experience_buffer.buffer) // 2 + 1
@@ -296,10 +300,10 @@ def main():
 
         # --- Go ahead and update the screen with what we've drawn.
 
-        if DISPLAY:
-            surf = display_graph(game)
-            [screen.blit(line, (400, 100 + j*20)) for j, line in enumerate(textsurface)]
-            screen.blit(surf, (400, 180))
+        #if DISPLAY:
+            #surf = display_graph(game)
+            #[screen.blit(line, (400, 100 + j*20)) for j, line in enumerate(textsurface)]
+            #screen.blit(surf, (400, 180))
 
         pygame.display.flip()
 
@@ -516,15 +520,16 @@ def archive(mouse, state, action, reward, next_state, d, batch_history = [], bat
 
 class State_Archive():
     def __init__(self):
-        self.archive = []
+        self.archive_ = []
     def add_experience(self, state):
-        self.archive.append(state)
+        #print np.squeeze(state).shape
+        self.archive_.append(np.squeeze(state))
 
-        if len(self.archive) > 10:
-            self.archive = self.archive[-10:]
+        if len(self.archive_) > 10:
+            self.archive_ = self.archive_[-10:]
 
     def get_archive(self):
-        return np.array(archive)
+        return np.array(self.archive_)
 
 
 

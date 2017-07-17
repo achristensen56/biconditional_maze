@@ -13,7 +13,7 @@ import pygame
 import Maze_Env as ME
 import numpy as np
 import matplotlib
-#matplotlib.use("Agg")
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.backends.backend_agg as agg
 import sys
